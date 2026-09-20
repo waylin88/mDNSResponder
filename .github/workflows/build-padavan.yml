@@ -19,314 +19,214 @@ on:
         default: false
 
 env:
-  ARTIFACT_NAME: mdns-responder-padavan
+  TOOLCHAIN_DIR: /opt/padavan-toolchain
 
 jobs:
-  # =========================================================================
-  # MIPS little-endian (mipsel) + musl  -- 最常见的 Padavan 路由器架构
-  # 适用于: MT7620 / MT7621 系列路由器
-  # =========================================================================
-  build-mipsel:
+  # =======================================================================
+  # 使用 Padavan uClibc 工具链编译 mDNSResponder
+  # 工具链来源: hanwckf/padavan-toolchain (与 waylin88/Padavan 兼容)
+  # 适用于 MT7620 / MT7621 系列路由器
+  # =======================================================================
+  build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: mipsel
-            toolchain_url: https://musl.cc/mipsel-linux-musl-cross.tgz
-            toolchain_prefix: mipsel-linux-musl
-            os_target: linux
-            desc: "MIPS little-endian (MT7620/MT7621)"
-
     steps:
-      - name: Checkout code
+      # -------------------------------------------------------------------
+      # 1. 拉取源码
+      # -------------------------------------------------------------------
+      - name: Checkout mDNSResponder
         uses: actions/checkout@v4
 
+      - name: Checkout Padavan firmware source (for toolchain reference)
+        uses: actions/checkout@v4
+        with:
+          repository: waylin88/Padavan
+          path: Padavan
+          sparse-checkout: |
+            toolchain-mipsel
+            trunk/toolchain.inc
+            trunk/Makefile
+
+      # -------------------------------------------------------------------
+      # 2. 安装依赖
+      # -------------------------------------------------------------------
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential wget xz-utils
 
+      # -------------------------------------------------------------------
+      # 3. 下载并安装 Padavan 交叉编译工具链 (mipsel-linux-uclibc)
+      # -------------------------------------------------------------------
       - name: Cache toolchain
         id: cache-toolchain
         uses: actions/cache@v4
         with:
-          path: /opt/${{ matrix.toolchain_prefix }}
-          key: toolchain-${{ matrix.arch }}-${{ hashFiles('.github/workflows/build-padavan.yml') }}
+          path: ${{ env.TOOLCHAIN_DIR }}
+          key: padavan-toolchain-mipsel-uclibc-v1
 
-      - name: Download and extract cross-compilation toolchain
+      - name: Download Padavan toolchain
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
-          echo "Downloading toolchain from ${{ matrix.toolchain_url }} ..."
-          wget -q --show-progress "${{ matrix.toolchain_url }}" -O /tmp/toolchain.tar.gz
-          echo "Extracting toolchain to /opt/${{ matrix.toolchain_prefix }} ..."
-          sudo mkdir -p /opt/${{ matrix.toolchain_prefix }}
-          sudo tar xf /tmp/toolchain.tar.gz -C /opt/
-          # musl.cc 解压后目录名可能带有额外路径，需要找到实际目录
-          TOOLCHAIN_DIR=$(ls -d /opt/${{ matrix.toolchain_prefix }}* 2>/dev/null | head -1)
-          if [ "$TOOLCHAIN_DIR" != "/opt/${{ matrix.toolchain_prefix }}" ] && [ -d "$TOOLCHAIN_DIR" ]; then
-            sudo mv "$TOOLCHAIN_DIR" /opt/${{ matrix.toolchain_prefix }}
-          fi
-          rm /tmp/toolchain.tar.gz
-          echo "Toolchain installed at /opt/${{ matrix.toolchain_prefix }}"
-          ls /opt/${{ matrix.toolchain_prefix }}/bin/ | head -20
+          echo "Downloading Padavan uClibc toolchain..."
+          wget -q --show-progress \
+            "https://github.com/hanwckf/padavan-toolchain/releases/download/v1.0/mipsel-linux-uclibc.tar.xz" \
+            -O /tmp/toolchain.tar.xz
 
-      - name: Setup environment
-        run: |
-          TOOLCHAIN_BIN="/opt/${{ matrix.toolchain_prefix }}/bin"
-          echo "${TOOLCHAIN_BIN}" >> $GITHUB_PATH
-          echo "CROSS_COMPILE=${{ matrix.toolchain_prefix }}-" >> $GITHUB_ENV
-          echo "CC=${{ matrix.toolchain_prefix }}-cc" >> $GITHUB_ENV
-          echo "STRIP=${{ matrix.toolchain_prefix }}-strip" >> $GITHUB_ENV
-          echo "LD=${{ matrix.toolchain_prefix }}-ld" >> $GITHUB_ENV
-          # 验证交叉编译器可用
-          ${TOOLCHAIN_BIN}/${{ matrix.toolchain_prefix }}-cc --version || true
+          echo "Extracting toolchain..."
+          sudo mkdir -p "${{ env.TOOLCHAIN_DIR }}"
+          sudo tar xf /tmp/toolchain.tar.xz -C "${{ env.TOOLCHAIN_DIR }}"
+          rm /tmp/toolchain.tar.xz
 
-      - name: Build mDNSResponder daemon (mdnsd)
+          echo "Toolchain structure:"
+          ls -la "${{ env.TOOLCHAIN_DIR }}/"
+          ls -la "${{ env.TOOLCHAIN_DIR }}/bin/" | head -20
+
+          echo "Verifying compiler..."
+          "${{ env.TOOLCHAIN_DIR }}/bin/mipsel-linux-uclibc-gcc" --version || true
+
+      # -------------------------------------------------------------------
+      # 4. 编译 mDNSResponder
+      # -------------------------------------------------------------------
+      - name: Build mdnsd daemon and libdns_sd.so
         run: |
+          export PATH="${{ env.TOOLCHAIN_DIR }}/bin:$PATH"
+
           cd mDNSPosix
           make -j$(nproc) \
-            os=${{ matrix.os_target }} \
+            os=linux-uclibc \
             tls=no \
-            CC=${{ matrix.toolchain_prefix }}-cc \
-            LD=${{ matrix.toolchain_prefix }}-cc \
-            ST=${{ matrix.toolchain_prefix }}-strip \
-            STRIP="${{ matrix.toolchain_prefix }}-strip -S" \
+            CC=mipsel-linux-uclibc-gcc \
+            LD=mipsel-linux-uclibc-gcc \
+            ST=mipsel-linux-uclibc-strip \
+            STRIP="mipsel-linux-uclibc-strip -S" \
             ${{ github.event.inputs.debug == 'true' && 'DEBUG=1' || '' }} \
             Daemon libdns_sd
 
       - name: Build dns-sd CLI tool
         run: |
+          export PATH="${{ env.TOOLCHAIN_DIR }}/bin:$PATH"
+
           cd mDNSPosix
           make -j$(nproc) \
-            os=${{ matrix.os_target }} \
+            os=linux-uclibc \
             tls=no \
-            CC=${{ matrix.toolchain_prefix }}-cc \
-            LD=${{ matrix.toolchain_prefix }}-cc \
-            ST=${{ matrix.toolchain_prefix }}-strip \
-            STRIP="${{ matrix.toolchain_prefix }}-strip -S" \
+            CC=mipsel-linux-uclibc-gcc \
+            LD=mipsel-linux-uclibc-gcc \
+            ST=mipsel-linux-uclibc-strip \
+            STRIP="mipsel-linux-uclibc-strip -S" \
             ${{ github.event.inputs.debug == 'true' && 'DEBUG=1' || '' }} \
             Clients
 
+      # -------------------------------------------------------------------
+      # 5. 验证产物
+      # -------------------------------------------------------------------
       - name: Verify built binaries
         run: |
           echo "=== mdnsd ==="
-          file mDNSPosix/build/prod/mdnsd || true
-          ls -lh mDNSPosix/build/prod/mdnsd || true
+          file mDNSPosix/build/prod/mdnsd || echo "MISSING - build may have failed"
+          ls -lh mDNSPosix/build/prod/mdnsd 2>/dev/null || true
           echo ""
-          echo "=== libdns_sd.so ==="
-          file mDNSPosix/build/prod/libdns_sd.so || true
-          ls -lh mDNSPosix/build/prod/libdns_sd.so || true
-          echo ""
-          echo "=== dns-sd ==="
-          file Clients/build/prod/dns-sd || true
-          ls -lh Clients/build/prod/dns-sd || true
 
+          echo "=== libdns_sd.so ==="
+          file mDNSPosix/build/prod/libdns_sd.so || echo "MISSING - build may have failed"
+          ls -lh mDNSPosix/build/prod/libdns_sd.so 2>/dev/null || true
+          echo ""
+
+          echo "=== dns-sd ==="
+          file Clients/build/prod/dns-sd || echo "MISSING - build may have failed"
+          ls -lh Clients/build/prod/dns-sd 2>/dev/null || true
+
+      # -------------------------------------------------------------------
+      # 6. 打包产物
+      # -------------------------------------------------------------------
       - name: Prepare artifact directory
         run: |
-          mkdir -p artifacts/mdns-padavan-${{ matrix.arch }}
-          cp mDNSPosix/build/prod/mdnsd           artifacts/mdns-padavan-${{ matrix.arch }}/ 2>/dev/null || true
-          cp mDNSPosix/build/prod/libdns_sd.so     artifacts/mdns-padavan-${{ matrix.arch }}/ 2>/dev/null || true
-          cp Clients/build/prod/dns-sd             artifacts/mdns-padavan-${{ matrix.arch }}/ 2>/dev/null || true
-          cp mDNSShared/dns_sd.h                   artifacts/mdns-padavan-${{ matrix.arch }}/ 2>/dev/null || true
-          cp mDNSPosix/mdnsd.sh                    artifacts/mdns-padavan-${{ matrix.arch }}/ 2>/dev/null || true
-          # 生成版本信息
-          echo "Build date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"    > artifacts/mdns-padavan-${{ matrix.arch }}/build-info.txt
-          echo "Target:     ${{ matrix.desc }}"                      >> artifacts/mdns-padavan-${{ matrix.arch }}/build-info.txt
-          echo "Arch:       ${{ matrix.arch }}"                      >> artifacts/mdns-padavan-${{ matrix.arch }}/build-info.txt
-          echo "Toolchain:  ${{ matrix.toolchain_prefix }}"          >> artifacts/mdns-padavan-${{ matrix.arch }}/build-info.txt
-          echo "Commit:     ${{ github.sha }}"                       >> artifacts/mdns-padavan-${{ matrix.arch }}/build-info.txt
-          # 列出最终产物
+          mkdir -p artifacts/mdns-padavan
+
+          cp mDNSPosix/build/prod/mdnsd           artifacts/mdns-padavan/ 2>/dev/null || true
+          cp mDNSPosix/build/prod/libdns_sd.so     artifacts/mdns-padavan/ 2>/dev/null || true
+          cp Clients/build/prod/dns-sd             artifacts/mdns-padavan/ 2>/dev/null || true
+          cp mDNSShared/dns_sd.h                   artifacts/mdns-padavan/ 2>/dev/null || true
+          cp mDNSPosix/mdnsd.sh                    artifacts/mdns-padavan/ 2>/dev/null || true
+
+          echo "Build date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"   > artifacts/mdns-padavan/build-info.txt
+          echo "Target:     Padavan (MIPS little-endian uClibc)"   >> artifacts/mdns-padavan/build-info.txt
+          echo "Toolchain:  mipsel-linux-uclibc (gcc 3.4.x)"       >> artifacts/mdns-padavan/build-info.txt
+          echo "Adapter:    MT7620 / MT7621 / MT7628"              >> artifacts/mdns-padavan/build-info.txt
+          echo "Commit:     ${{ github.sha }}"                     >> artifacts/mdns-padavan/build-info.txt
+
           echo ""
           echo "=== Artifacts ==="
-          ls -lhR artifacts/mdns-padavan-${{ matrix.arch }}/
+          ls -lhR artifacts/mdns-padavan/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}-${{ matrix.arch }}
-          path: artifacts/mdns-padavan-${{ matrix.arch }}/*
+          name: mdns-responder-padavan-mipsel
+          path: artifacts/mdns-padavan/*
           retention-days: 90
 
-  # =========================================================================
-  # MIPS big-endian (mips) + musl  -- 部分老旧 Padavan 路由器
-  # =========================================================================
-  build-mips:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential wget xz-utils
-
-      - name: Download and extract MIPS big-endian toolchain
-        run: |
-          TOOLCHAIN_URL="https://musl.cc/mips-linux-musl-cross.tgz"
-          TOOLCHAIN_DIR="/opt/mips-linux-musl"
-          echo "Downloading toolchain..."
-          wget -q --show-progress "$TOOLCHAIN_URL" -O /tmp/toolchain.tar.gz
-          sudo mkdir -p "$TOOLCHAIN_DIR"
-          sudo tar xf /tmp/toolchain.tar.gz -C /opt/
-          EXTRACTED_DIR=$(ls -d /opt/mips-linux-musl* 2>/dev/null | head -1)
-          if [ "$EXTRACTED_DIR" != "$TOOLCHAIN_DIR" ] && [ -d "$EXTRACTED_DIR" ]; then
-            sudo mv "$EXTRACTED_DIR" "$TOOLCHAIN_DIR"
-          fi
-          rm /tmp/toolchain.tar.gz
-          echo "$TOOLCHAIN_DIR/bin" >> $GITHUB_PATH
-
-      - name: Build mDNSResponder (MIPS big-endian)
-        run: |
-          cd mDNSPosix
-          make -j$(nproc) \
-            os=linux \
-            tls=no \
-            CC=mips-linux-musl-cc \
-            LD=mips-linux-musl-cc \
-            ST=mips-linux-musl-strip \
-            STRIP="mips-linux-musl-strip -S" \
-            Daemon libdns_sd Clients
-
-      - name: Prepare and upload artifacts (MIPS BE)
-        run: |
-          mkdir -p artifacts/mdns-padavan-mips
-          cp mDNSPosix/build/prod/mdnsd           artifacts/mdns-padavan-mips/ 2>/dev/null || true
-          cp mDNSPosix/build/prod/libdns_sd.so     artifacts/mdns-padavan-mips/ 2>/dev/null || true
-          cp Clients/build/prod/dns-sd             artifacts/mdns-padavan-mips/ 2>/dev/null || true
-          cp mDNSShared/dns_sd.h                   artifacts/mdns-padavan-mips/ 2>/dev/null || true
-          cp mDNSPosix/mdnsd.sh                    artifacts/mdns-padavan-mips/ 2>/dev/null || true
-          echo "Build date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" > artifacts/mdns-padavan-mips/build-info.txt
-          echo "Target:     MIPS big-endian"                      >> artifacts/mdns-padavan-mips/build-info.txt
-          echo "Arch:       mips"                                 >> artifacts/mdns-padavan-mips/build-info.txt
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}-mips
-          path: artifacts/mdns-padavan-mips/*
-          retention-days: 90
-
-  # =========================================================================
-  # ARMv7 (armhf) + musl  -- 部分新款 Padavan/老毛子固件路由器
-  # 适用于: 某些使用 ARM 处理器的路由器
-  # =========================================================================
-  build-armhf:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential wget xz-utils
-
-      - name: Download and extract ARMv7 toolchain
-        run: |
-          TOOLCHAIN_URL="https://musl.cc/armv7l-linux-musleabihf-cross.tgz"
-          TOOLCHAIN_DIR="/opt/armv7l-linux-musleabihf"
-          echo "Downloading toolchain..."
-          wget -q --show-progress "$TOOLCHAIN_URL" -O /tmp/toolchain.tar.gz
-          sudo mkdir -p "$TOOLCHAIN_DIR"
-          sudo tar xf /tmp/toolchain.tar.gz -C /opt/
-          EXTRACTED_DIR=$(ls -d /opt/armv7l-linux-musleabihf* 2>/dev/null | head -1)
-          if [ "$EXTRACTED_DIR" != "$TOOLCHAIN_DIR" ] && [ -d "$EXTRACTED_DIR" ]; then
-            sudo mv "$EXTRACTED_DIR" "$TOOLCHAIN_DIR"
-          fi
-          rm /tmp/toolchain.tar.gz
-          echo "$TOOLCHAIN_DIR/bin" >> $GITHUB_PATH
-
-      - name: Build mDNSResponder (ARMv7)
-        run: |
-          cd mDNSPosix
-          make -j$(nproc) \
-            os=linux \
-            tls=no \
-            CC=armv7l-linux-musleabihf-cc \
-            LD=armv7l-linux-musleabihf-cc \
-            ST=armv7l-linux-musleabihf-strip \
-            STRIP="armv7l-linux-musleabihf-strip -S" \
-            Daemon libdns_sd Clients
-
-      - name: Prepare and upload artifacts (ARMv7)
-        run: |
-          mkdir -p artifacts/mdns-padavan-armhf
-          cp mDNSPosix/build/prod/mdnsd           artifacts/mdns-padavan-armhf/ 2>/dev/null || true
-          cp mDNSPosix/build/prod/libdns_sd.so     artifacts/mdns-padavan-armhf/ 2>/dev/null || true
-          cp Clients/build/prod/dns-sd             artifacts/mdns-padavan-armhf/ 2>/dev/null || true
-          cp mDNSShared/dns_sd.h                   artifacts/mdns-padavan-armhf/ 2>/dev/null || true
-          cp mDNSPosix/mdnsd.sh                    artifacts/mdns-padavan-armhf/ 2>/dev/null || true
-          echo "Build date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" > artifacts/mdns-padavan-armhf/build-info.txt
-          echo "Target:     ARMv7 hard-float"                     >> artifacts/mdns-padavan-armhf/build-info.txt
-          echo "Arch:       armhf"                                >> artifacts/mdns-padavan-armhf/build-info.txt
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}-armhf
-          path: artifacts/mdns-padavan-armhf/*
-          retention-days: 90
-
-  # =========================================================================
-  # 汇总发布 (Release)
-  # 当推送 tag 时自动创建 GitHub Release
-  # =========================================================================
+  # =======================================================================
+  # 发布: 推送 tag 时自动创建 GitHub Release
+  # =======================================================================
   create-release:
-    needs: [build-mipsel, build-mips, build-armhf]
+    needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: ${{ env.ARTIFACT_NAME }}-*
-          path: release-artifacts
-          merge-multiple: false
+          name: mdns-responder-padavan-mipsel
+          path: release
 
       - name: Create release archive
         run: |
-          cd release-artifacts
-          for dir in */; do
-            dirname=$(basename "$dir")
-            tar czf "${dirname}.tar.gz" "$dir"
-            echo "Created ${dirname}.tar.gz"
-          done
-          ls -lh *.tar.gz
+          cd release
+          tar czf mdns-responder-padavan-mipsel.tar.gz *
+          ls -lh mdns-responder-padavan-mipsel.tar.gz
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/*.tar.gz
+          files: release/mdns-responder-padavan-mipsel.tar.gz
           name: "mDNSResponder for Padavan - ${{ github.ref_name }}"
           body: |
             ## mDNSResponder for Padavan
 
-            自动编译的 mDNSResponder 组件，适用于 Padavan 固件。
+            使用 Padavan uClibc 工具链 (`mipsel-linux-uclibc-gcc`) 交叉编译。
 
-            ### 包含的二进制文件
-            - **mdnsd** — mDNS 响应守护进程
-            - **libdns_sd.so** — DNS-SD 客户端共享库
-            - **dns-sd** — DNS-SD 命令行测试工具
-            - **dns_sd.h** — 开发头文件
-            - **mdnsd.sh** — 启动脚本
-
-            ### 可用架构
-            - **mipsel** — MIPS little-endian (MT7620/MT7621 等)
-            - **mips** — MIPS big-endian (老旧路由器)
-            - **armhf** — ARMv7 hard-float (部分新款路由器)
+            ### 包含文件
+            | 文件 | 路由器路径 | 用途 |
+            |------|-----------|------|
+            | `mdnsd` | `/usr/sbin/mdnsd` | mDNS 响应守护进程 |
+            | `libdns_sd.so` | `/usr/lib/libdns_sd.so` | DNS-SD 客户端共享库 |
+            | `dns-sd` | `/usr/bin/dns-sd` | DNS-SD 命令行测试工具 |
+            | `dns_sd.h` | — | 开发头文件 |
+            | `mdnsd.sh` | `/etc/init.d/mdns` | 启动脚本 |
 
             ### 部署方法
-            1. 将 `mdnsd` 复制到路由器 `/usr/sbin/mdnsd`
-            2. 将 `libdns_sd.so` 复制到路由器 `/usr/lib/libdns_sd.so`
-            3. 将 `mdnsd.sh` 复制到路由器 `/etc/init.d/mdns` 并赋予执行权限
-            4. 启动: `/etc/init.d/mdns start`
+            ```sh
+            # 1. 上传到路由器
+            scp mdnsd admin@192.168.123.1:/tmp/
+            scp libdns_sd.so admin@192.168.123.1:/tmp/
+            scp mdnsd.sh admin@192.168.123.1:/tmp/
+
+            # 2. SSH 到路由器安装
+            ssh admin@192.168.123.1
+            cp /tmp/mdnsd /usr/sbin/mdnsd
+            cp /tmp/libdns_sd.so /usr/lib/libdns_sd.so
+            cp /tmp/mdnsd.sh /etc/init.d/mdns
+            chmod +x /usr/sbin/mdnsd /etc/init.d/mdns
+
+            # 3. 启动 mDNS
+            /etc/init.d/mdns start
+            ```
+
+            ### 适用路由器
+            - MT7620 / MT7621 / MT7628 系列 (MIPS little-endian)
+            - 固件: waylin88/Padavan 及所有基于 hanwckf/rt-n56u 的 Padavan 固件
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
