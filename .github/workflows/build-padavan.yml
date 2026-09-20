@@ -98,7 +98,9 @@ jobs:
             CC=mipsel-linux-uclibc-gcc \
             LD=mipsel-linux-uclibc-gcc \
             ST=mipsel-linux-uclibc-strip \
-            STRIP="mipsel-linux-uclibc-strip -S" \
+            CFLAGS_DEBUGGING="-Os -DMDNS_DEBUGMSGS=0 -fdata-sections -ffunction-sections" \
+            LINKOPTS="-Wl,--gc-sections" \
+            STRIP="mipsel-linux-uclibc-strip" \
             ${{ github.event.inputs.debug == 'true' && 'DEBUG=1' || '' }} \
             Daemon libdns_sd
 
@@ -113,7 +115,9 @@ jobs:
             CC=mipsel-linux-uclibc-gcc \
             LD=mipsel-linux-uclibc-gcc \
             ST=mipsel-linux-uclibc-strip \
-            STRIP="mipsel-linux-uclibc-strip -S" \
+            CFLAGS_DEBUGGING="-Os -DMDNS_DEBUGMSGS=0 -fdata-sections -ffunction-sections" \
+            LINKOPTS="-Wl,--gc-sections" \
+            STRIP="mipsel-linux-uclibc-strip" \
             ${{ github.event.inputs.debug == 'true' && 'DEBUG=1' || '' }} \
             Clients
 
