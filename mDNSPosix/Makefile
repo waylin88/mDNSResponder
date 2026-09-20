@@ -283,7 +283,7 @@ Clients: setup ../Clients/build/dns-sd
 	@echo "Clients done"
 
 ../Clients/build/dns-sd: ../Clients/dns-sd.c libdns_sd
-	$(MAKE) -C ../Clients DEBUG=$(DEBUG) SUPMAKE_CFLAGS="$(MDNSCFLAGS)"
+	$(MAKE) -C ../Clients DEBUG=$(DEBUG) CC="$(CC)" SUPMAKE_CFLAGS="$(MDNSCFLAGS)"
 
 # nss_mdns target builds the Name Service Switch module
 nss_mdns: setup $(BUILDDIR)/$(NSSLIBFILE)
