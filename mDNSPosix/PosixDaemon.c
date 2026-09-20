@@ -181,8 +181,9 @@ mDNSlocal mStatus MainLoop(mDNS *m) // Loop until we quit.
         if (sigismember(&signals, SIGUSR1)) DumpStateLog();
         if (sigismember(&signals, SIGUSR2))
         {
-            mDNS_DebugLoggingEnabled = !mDNS_DebugLoggingEnabled;
-            LogMsg("Received SIGUSR2 - %s debug level logging.", mDNS_DebugLoggingEnabled ? "Enable" : "Disable");
+            mDNS_LoggingEnabled = !mDNS_LoggingEnabled;
+            mDNS_DebugLoggingEnabled = mDNS_LoggingEnabled;
+            LogMsg("Received SIGUSR2 - %s logging.", mDNS_LoggingEnabled ? "Enable" : "Disable");
         }
         // SIGPIPE happens when we try to write to a dead client; death should be detected soon in request_callback() and cleaned up.
         if (sigismember(&signals, SIGPIPE)) LogMsg("Received SIGPIPE - ignoring");
@@ -197,8 +198,7 @@ int main(int argc, char **argv)
 
     ParseCmdLineArgs(argc, argv);
 
-    // Enable mDNSResponder logging by default.
-    mDNS_LoggingEnabled = mDNStrue;
+    mDNS_LoggingEnabled = mDNS_DebugMode ? mDNStrue : mDNSfalse;
 
     // LogMsg("%s starting", mDNSResponderVersionString);
 
