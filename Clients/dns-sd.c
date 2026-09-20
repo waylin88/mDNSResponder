@@ -1911,6 +1911,22 @@ static int API_input_range_test(void)
     return 0;
 }
 
+static void HideCommandLine(int argc, char **argv, const char *label)
+{
+#ifdef __linux__
+    if (argc > 0 && argv[0])
+    {
+        int total = 0;
+        int i;
+        for (i = 0; i < argc; i++) total += (int)strlen(argv[i]) + 1;
+        memset(argv[0], 0, total);
+        strncpy(argv[0], label, total - 1);
+    }
+#else
+    (void)argc; (void)argv; (void)label;
+#endif
+}
+
 int main(int argc, char **argv)
 {
     DNSServiceErrorType err;
@@ -1919,10 +1935,10 @@ int main(int argc, char **argv)
     DNSServiceFlags flags = 0;
     unsigned char enable_dnssec = 0;
     const char *callName = "DNS Service call";
+    int hideme = 0;
+    int orig_argc = argc;
+    char **orig_argv = argv;
 
-    // Extract the program name from argv[0], which by convention contains the path to this executable.
-    // Note that this is just a voluntary convention, not enforced by the kernel --
-    // the process calling exec() can pass bogus data in argv[0] if it chooses to.
     const char *a0 = strrchr(argv[0], kFilePathSep) + 1;
     if (a0 == (const char *)1) a0 = argv[0];
 
@@ -1947,6 +1963,13 @@ int main(int argc, char **argv)
 
         // record current argc to see if we process an argument in this pass
         entryCount = argc;
+
+        if (argc > 1 && !strcmp(argv[1], "-hide"))
+        {
+            argc--;
+            argv++;
+            hideme = 1;
+        }
 
         if (argc > 1 && !strcmp(argv[1], "-test"))
         {
@@ -2393,6 +2416,7 @@ int main(int argc, char **argv)
             (err == kDNSServiceErr_ServiceNotRunning) ? " (Service Not Running)" : "");
         return (-1);
     }
+    if (hideme) HideCommandLine(orig_argc, orig_argv, "dns-sd");
     printtimestamp();
     printf("...STARTING...\n");
     HandleEvents();
