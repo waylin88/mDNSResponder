@@ -36,16 +36,6 @@ jobs:
       - name: Checkout mDNSResponder
         uses: actions/checkout@v5
 
-      - name: Checkout Padavan firmware source (for toolchain reference)
-        uses: actions/checkout@v5
-        with:
-          repository: waylin88/Padavan
-          path: Padavan
-          sparse-checkout: |
-            toolchain-mipsel
-            trunk/toolchain.inc
-            trunk/Makefile
-
       # -------------------------------------------------------------------
       # 2. 安装依赖
       # -------------------------------------------------------------------
@@ -85,7 +75,7 @@ jobs:
           "${{ env.TOOLCHAIN_DIR }}/bin/mipsel-linux-uclibc-gcc" --version || true
 
       # -------------------------------------------------------------------
-      # 4. 编译 mDNSResponder
+      # 4. 编译 mDNSResponder（只构建 Daemon + 共享库，不构建 CLI 工具）
       # -------------------------------------------------------------------
       - name: Build mdnsd daemon and libdns_sd.so
         run: |
@@ -95,33 +85,14 @@ jobs:
           make -j$(nproc) \
             os=linux-uclibc \
             tls=no \
+            HAVE_IPV6=0 \
             CC=mipsel-linux-uclibc-gcc \
             LD=mipsel-linux-uclibc-gcc \
-            ST=mipsel-linux-uclibc-strip \
             CFLAGS_DEBUGGING="-Os -DMDNS_DEBUGMSGS=0 -fdata-sections -ffunction-sections" \
-            LINKOPTS="-Wl,--gc-sections" \
-            STRIP="mipsel-linux-uclibc-strip" \
+            LINKOPTS="-Wl,--gc-sections -Wl,--build-id=none" \
+            STRIP="mipsel-linux-uclibc-strip -s" \
             ${{ github.event.inputs.debug == 'true' && 'DEBUG=1' || '' }} \
             Daemon libdns_sd
-
-      - name: Build dns-sd CLI tool
-        run: |
-          export PATH="${{ env.TOOLCHAIN_DIR }}/bin:$PATH"
-
-          cd mDNSPosix
-          make -j$(nproc) \
-            os=linux-uclibc \
-            tls=no \
-            CC=mipsel-linux-uclibc-gcc \
-            LD=mipsel-linux-uclibc-gcc \
-            ST=mipsel-linux-uclibc-strip \
-            CFLAGS_DEBUGGING="-Os -DMDNS_DEBUGMSGS=0 -fdata-sections -ffunction-sections" \
-            LINKOPTS="-Wl,--gc-sections" \
-            STRIP="mipsel-linux-uclibc-strip" \
-            ${{ github.event.inputs.debug == 'true' && 'DEBUG=1' || '' }} \
-            Clients
-
-          mipsel-linux-uclibc-strip ../Clients/build/dns-sd || true
 
       # -------------------------------------------------------------------
       # 5. 验证产物
@@ -136,11 +107,6 @@ jobs:
           echo "=== libdns_sd.so ==="
           file mDNSPosix/build/prod/libdns_sd.so || echo "MISSING - build may have failed"
           ls -lh mDNSPosix/build/prod/libdns_sd.so 2>/dev/null || true
-          echo ""
-
-          echo "=== dns-sd ==="
-          file Clients/build/dns-sd || echo "MISSING - build may have failed"
-          ls -lh Clients/build/dns-sd 2>/dev/null || true
 
       # -------------------------------------------------------------------
       # 6. 打包产物
@@ -151,7 +117,6 @@ jobs:
 
           cp mDNSPosix/build/prod/mdnsd           artifacts/mdns-padavan/ 2>/dev/null || true
           cp mDNSPosix/build/prod/libdns_sd.so     artifacts/mdns-padavan/ 2>/dev/null || true
-          cp Clients/build/dns-sd             artifacts/mdns-padavan/ 2>/dev/null || true
           cp mDNSShared/dns_sd.h                   artifacts/mdns-padavan/ 2>/dev/null || true
           cp mDNSPosix/mdnsd.sh                    artifacts/mdns-padavan/ 2>/dev/null || true
 
@@ -159,6 +124,7 @@ jobs:
           echo "Target:     Padavan (MIPS little-endian uClibc)"   >> artifacts/mdns-padavan/build-info.txt
           echo "Toolchain:  mipsel-linux-uclibc (gcc 3.4.x)"       >> artifacts/mdns-padavan/build-info.txt
           echo "Adapter:    MT7620 / MT7621 / MT7628"              >> artifacts/mdns-padavan/build-info.txt
+          echo "Features:   Multicast DNS + DNS-SD (printer discovery)" >> artifacts/mdns-padavan/build-info.txt
           echo "Commit:     ${{ github.sha }}"                     >> artifacts/mdns-padavan/build-info.txt
 
           echo ""
@@ -203,13 +169,13 @@ jobs:
             ## mDNSResponder for Padavan
 
             使用 Padavan uClibc 工具链 (`mipsel-linux-uclibc-gcc`) 交叉编译。
+            精简版：仅保留 mDNS 多播 + DNS-SD 打印机发现功能（NAT-PMP / Sleep Proxy / TLS 已自动剔除）。
 
             ### 包含文件
             | 文件 | 路由器路径 | 用途 |
             |------|-----------|------|
             | `mdnsd` | `/usr/sbin/mdnsd` | mDNS 响应守护进程 |
             | `libdns_sd.so` | `/usr/lib/libdns_sd.so` | DNS-SD 客户端共享库 |
-            | `dns-sd` | `/usr/bin/dns-sd` | DNS-SD 命令行测试工具 |
             | `dns_sd.h` | — | 开发头文件 |
             | `mdnsd.sh` | `/etc/init.d/mdns` | 启动脚本 |
 
@@ -231,8 +197,11 @@ jobs:
             /etc/init.d/mdns start
             ```
 
-            ### 适用路由器
-            - MT7620 / MT7621 / MT7628 系列 (MIPS little-endian)
+            ### 适用场景
+            - 局域网内自动发现打印机（`_ipp._tcp.local`、`_printer._tcp.local`）
+            - AirPrint、Bonjour 打印
+            - 纯 IPv4 网络（无 IPv6）
+            - MT7620 / MT7621 / MT7628 系列路由器
             - 固件: waylin88/Padavan 及所有基于 hanwckf/rt-n56u 的 Padavan 固件
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
