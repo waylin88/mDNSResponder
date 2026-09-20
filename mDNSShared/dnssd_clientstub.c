@@ -880,7 +880,7 @@ static DNSServiceErrorType ConnectToServer(DNSServiceRef *ref, DNSServiceFlags f
             // then we give up and return a failure code.
             if (++NumTries < DNSSD_CLIENT_MAXTRIES)
             {
-                syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: connect()-> No of tries: %d", NumTries);
+                // syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: connect()-> No of tries: %d", NumTries);
                 sleep(1); // Sleep a bit, then try again
             }
             else

@@ -1,0 +1,66 @@
+================================================================================
+  mDNSResponder 日志抑制修改记录
+  日期: 2026-09-20
+================================================================================
+
+共修改 3 个文件，抑制 4 条启动时的冗余日志。
+
+--------------------------------------------------------------------------------
+修改 1: mDNSShared/dnssd_clientstub.c (第 883 行)
+--------------------------------------------------------------------------------
+  原日志:
+    dnssd_clientstub ConnectToServer: connect()-> No of tries: 1
+
+  修改方式: 注释掉 syslog() 调用
+
+  修改内容:
+    - syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: connect()-> No of tries: %d", NumTries);
+    + // syslog(LOG_WARNING, "dnssd_clientstub ConnectToServer: connect()-> No of tries: %d", NumTries);
+
+  说明: 客户端重连 daemon 时的重试计数日志，启动时 daemon 尚未就绪便会触发。
+
+--------------------------------------------------------------------------------
+修改 2: mDNSPosix/PosixDaemon.c (第 203 行)
+--------------------------------------------------------------------------------
+  原日志:
+    mDNSResponder (Engineering Build) (May 27 2026 22:14:26) starting
+
+  修改方式: 注释掉 LogMsg() 调用
+
+  修改内容:
+    - LogMsg("%s starting", mDNSResponderVersionString);
+    + // LogMsg("%s starting", mDNSResponderVersionString);
+
+  说明: 启动横幅日志，每次启动都会打印版本和编译时间信息。
+
+--------------------------------------------------------------------------------
+修改 3: mDNSCore/uDNS.c (第 142 行)
+--------------------------------------------------------------------------------
+  原日志:
+    mDNS_AddDNSServer: Lock not held! mDNS_busy (0) mDNS_reentrancy (0)
+
+  修改方式: 注释掉 mDNS_CheckLock() 调用
+
+  修改内容:
+    - mDNS_CheckLock(m);
+    + // mDNS_CheckLock(m);
+
+  说明: mDNS_AddDNSServer 入口处的锁状态检查。启动时 DHCP/DNS 配置尚未就绪，
+        此时调用尚未持锁，触发警告日志。注释后该函数的锁检查被禁用。
+
+--------------------------------------------------------------------------------
+修改 4: mDNSCore/uDNS.c (第 4932 行)
+--------------------------------------------------------------------------------
+  原日志:
+    CheckNATMappings: Failed to allocate port 5350 UDP multicast socket for PCP & NAT-PMP announcements
+
+  修改方式: 注释掉 LogMsg() 调用
+
+  修改内容:
+    - LogMsg("CheckNATMappings: Failed to allocate port 5350 UDP multicast socket for PCP & NAT-PMP announcements");
+    + // LogMsg("CheckNATMappings: Failed to allocate port 5350 UDP multicast socket for PCP & NAT-PMP announcements");
+
+  说明: NAT-PMP/PCP 端口 5350 多播 socket 分配失败日志。在无 NAT 环境下
+        此端口分配会失败，属于正常情况，日志多余。
+
+================================================================================

@@ -200,7 +200,7 @@ int main(int argc, char **argv)
     // Enable mDNSResponder logging by default.
     mDNS_LoggingEnabled = mDNStrue;
 
-    LogMsg("%s starting", mDNSResponderVersionString);
+    // LogMsg("%s starting", mDNSResponderVersionString);
 
     err = mDNS_Init(&mDNSStorage, &PlatformStorage, gRRCache, RR_CACHE_SIZE, mDNS_Init_AdvertiseLocalAddresses,
                     mDNS_StatusCallback, mDNS_Init_NoInitCallbackContext);

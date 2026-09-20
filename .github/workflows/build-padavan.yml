@@ -28,16 +28,16 @@ jobs:
   # 适用于 MT7620 / MT7621 系列路由器
   # =======================================================================
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # -------------------------------------------------------------------
       # 1. 拉取源码
       # -------------------------------------------------------------------
       - name: Checkout mDNSResponder
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout Padavan firmware source (for toolchain reference)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: waylin88/Padavan
           path: Padavan
@@ -59,7 +59,7 @@ jobs:
       # -------------------------------------------------------------------
       - name: Cache toolchain
         id: cache-toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.TOOLCHAIN_DIR }}
           key: padavan-toolchain-mipsel-uclibc-v1
@@ -166,7 +166,7 @@ jobs:
           ls -lhR artifacts/mdns-padavan/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mdns-responder-padavan-mipsel
           path: artifacts/mdns-padavan/*
@@ -177,13 +177,13 @@ jobs:
   # =======================================================================
   create-release:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: mdns-responder-padavan-mipsel
           path: release

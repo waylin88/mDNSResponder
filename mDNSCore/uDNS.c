@@ -139,7 +139,7 @@ mDNSexport DNSServer *mDNS_AddDNSServer(mDNS *const m, const domainname *domain,
         isCLAT46      ? ", CLAT46"      : "",
         reqDO         ? ", reqDO"       : "");
 
-    mDNS_CheckLock(m);
+    // mDNS_CheckLock(m);
 
     // Scan our existing list to see if we already have a matching record for this DNS resolver
     for (p = &m->DNSServers; (server = *p) != mDNSNULL; p = &server->next)
@@ -4929,7 +4929,7 @@ mDNSexport void CheckNATMappings(mDNS *m)
             {
                 if (needLog)
                 {
-                    LogMsg("CheckNATMappings: Failed to allocate port 5350 UDP multicast socket for PCP & NAT-PMP announcements");
+                    // LogMsg("CheckNATMappings: Failed to allocate port 5350 UDP multicast socket for PCP & NAT-PMP announcements");
                     needLog = mDNSfalse;
                 }
             }
