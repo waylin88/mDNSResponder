@@ -1758,10 +1758,12 @@ mDNSlocal mDNSu32 ProcessRoutingNotification(int sd, mDNS *m)
                     debugf("rtattr type=IFA_ADDRESS(%d) %#a", pRta->rta_type, &addr);
 #endif
                 }
+                #ifdef IFA_FLAGS
                 else if (pRta->rta_type == IFA_FLAGS)
                 {
                     debugf("rtattr type=IFA_FLAGS(%d) 0x%" PRIx32, pRta->rta_type, *(uint32_t *)RTA_DATA(pRta));
                 }
+#endif
                 else
                 {
                     debugf("rtattr type=%s(%d) [%d bytes]", IFATypeName(pRta->rta_type), pRta->rta_type, RTA_PAYLOAD(pRta));
