@@ -121,7 +121,7 @@ jobs:
             ${{ github.event.inputs.debug == 'true' && 'DEBUG=1' || '' }} \
             Clients
 
-          mipsel-linux-uclibc-strip Clients/build/prod/dns-sd || true
+          mipsel-linux-uclibc-strip ../Clients/build/dns-sd || true
 
       # -------------------------------------------------------------------
       # 5. 验证产物
@@ -139,8 +139,8 @@ jobs:
           echo ""
 
           echo "=== dns-sd ==="
-          file Clients/build/prod/dns-sd || echo "MISSING - build may have failed"
-          ls -lh Clients/build/prod/dns-sd 2>/dev/null || true
+          file Clients/build/dns-sd || echo "MISSING - build may have failed"
+          ls -lh Clients/build/dns-sd 2>/dev/null || true
 
       # -------------------------------------------------------------------
       # 6. 打包产物
@@ -151,7 +151,7 @@ jobs:
 
           cp mDNSPosix/build/prod/mdnsd           artifacts/mdns-padavan/ 2>/dev/null || true
           cp mDNSPosix/build/prod/libdns_sd.so     artifacts/mdns-padavan/ 2>/dev/null || true
-          cp Clients/build/prod/dns-sd             artifacts/mdns-padavan/ 2>/dev/null || true
+          cp Clients/build/dns-sd             artifacts/mdns-padavan/ 2>/dev/null || true
           cp mDNSShared/dns_sd.h                   artifacts/mdns-padavan/ 2>/dev/null || true
           cp mDNSPosix/mdnsd.sh                    artifacts/mdns-padavan/ 2>/dev/null || true
 
