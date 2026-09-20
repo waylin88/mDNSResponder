@@ -75,9 +75,9 @@ jobs:
           "${{ env.TOOLCHAIN_DIR }}/bin/mipsel-linux-uclibc-gcc" --version || true
 
       # -------------------------------------------------------------------
-      # 4. 编译 mDNSResponder（只构建 Daemon + 共享库，不构建 CLI 工具）
+      # 4. 编译 mDNSResponder（Daemon + 共享库 + 测试工具）
       # -------------------------------------------------------------------
-      - name: Build mdnsd daemon and libdns_sd.so
+      - name: Build mdnsd daemon, libdns_sd.so and dns-sd CLI
         run: |
           export PATH="${{ env.TOOLCHAIN_DIR }}/bin:$PATH"
 
@@ -92,7 +92,9 @@ jobs:
             LINKOPTS="-Wl,--gc-sections -Wl,--build-id=none" \
             STRIP="mipsel-linux-uclibc-strip -s" \
             ${{ github.event.inputs.debug == 'true' && 'DEBUG=1' || '' }} \
-            Daemon libdns_sd
+            Daemon libdns_sd Clients
+
+          mipsel-linux-uclibc-strip ../Clients/build/dns-sd || true
 
       # -------------------------------------------------------------------
       # 5. 验证产物
@@ -107,6 +109,11 @@ jobs:
           echo "=== libdns_sd.so ==="
           file mDNSPosix/build/prod/libdns_sd.so || echo "MISSING - build may have failed"
           ls -lh mDNSPosix/build/prod/libdns_sd.so 2>/dev/null || true
+          echo ""
+
+          echo "=== dns-sd (CLI tool) ==="
+          file Clients/build/dns-sd || echo "MISSING - build may have failed"
+          ls -lh Clients/build/dns-sd 2>/dev/null || true
 
       # -------------------------------------------------------------------
       # 6. 打包产物
@@ -117,6 +124,7 @@ jobs:
 
           cp mDNSPosix/build/prod/mdnsd           artifacts/mdns-padavan/ 2>/dev/null || true
           cp mDNSPosix/build/prod/libdns_sd.so     artifacts/mdns-padavan/ 2>/dev/null || true
+          cp Clients/build/dns-sd             artifacts/mdns-padavan/ 2>/dev/null || true
           cp mDNSShared/dns_sd.h                   artifacts/mdns-padavan/ 2>/dev/null || true
           cp mDNSPosix/mdnsd.sh                    artifacts/mdns-padavan/ 2>/dev/null || true
 
@@ -169,37 +177,95 @@ jobs:
             ## mDNSResponder for Padavan
 
             使用 Padavan uClibc 工具链 (`mipsel-linux-uclibc-gcc`) 交叉编译。
-            精简版：仅保留 mDNS 多播 + DNS-SD 打印机发现功能（NAT-PMP / Sleep Proxy / TLS 已自动剔除）。
+            包含 mDNS 守护进程 + DNS-SD 客户端库 + `dns-sd` 命令行工具。
 
             ### 包含文件
             | 文件 | 路由器路径 | 用途 |
             |------|-----------|------|
             | `mdnsd` | `/usr/sbin/mdnsd` | mDNS 响应守护进程 |
             | `libdns_sd.so` | `/usr/lib/libdns_sd.so` | DNS-SD 客户端共享库 |
-            | `dns_sd.h` | — | 开发头文件 |
+            | `dns-sd` | `/usr/bin/dns-sd` | DNS-SD 命令行工具（注册/浏览/查询） |
             | `mdnsd.sh` | `/etc/init.d/mdns` | 启动脚本 |
 
             ### 部署方法
             ```sh
             # 1. 上传到路由器
-            scp mdnsd admin@192.168.123.1:/tmp/
-            scp libdns_sd.so admin@192.168.123.1:/tmp/
-            scp mdnsd.sh admin@192.168.123.1:/tmp/
+            scp mdnsd libdns_sd.so dns-sd mdnsd.sh admin@192.168.123.1:/tmp/
 
             # 2. SSH 到路由器安装
             ssh admin@192.168.123.1
-            cp /tmp/mdnsd /usr/sbin/mdnsd
+            cp /tmp/mdnsd      /usr/sbin/mdnsd
             cp /tmp/libdns_sd.so /usr/lib/libdns_sd.so
-            cp /tmp/mdnsd.sh /etc/init.d/mdns
-            chmod +x /usr/sbin/mdnsd /etc/init.d/mdns
+            cp /tmp/dns-sd     /usr/bin/dns-sd
+            cp /tmp/mdnsd.sh   /etc/init.d/mdns
+            chmod +x /usr/sbin/mdnsd /usr/bin/dns-sd /etc/init.d/mdns
 
-            # 3. 启动 mDNS
+            # 3. 启动守护进程
             /etc/init.d/mdns start
             ```
 
+            ### 🏷️ 注册打印机服务（核心用法）
+
+            路由器上的 p910nd/9100 打印服务器监听 9100 端口，需要把它广播给局域网：
+
+            ```sh
+            # AirPrint 打印机（推荐，iOS/macOS 自动发现）
+            dns-sd -R "Padavan Printer" _ipp._tcp local. 9100 \
+                rp=auto \
+                pdl=application/pdf \
+                TXTvers=1.0 \
+                AirPrint=1
+
+            # 传统 LPR 打印机
+            dns-sd -R "Padavan Printer LPR" _printer._tcp local. 515 \
+                rp=auto \
+                pdl=application/postscript
+
+            # 同时注册多种协议（让更多设备能发现）
+            dns-sd -R "Padavan Printer" _printer._tcp local. 9100 \
+                rp=auto &
+            dns-sd -R "Padavan Printer" _ipp._tcp local. 9100 \
+                rp=auto pdl=application/pdf AirPrint=1 &
+            ```
+
+            ### 🔍 调试与验证
+            ```sh
+            # 浏览局域网所有打印机服务
+            dns-sd -B _ipp._tcp local.
+            dns-sd -B _printer._tcp local.
+
+            # 查询指定服务详情
+            dns-sd -L "Padavan Printer" _ipp._tcp local.
+
+            # 查看所有 DNS-SD 服务
+            dns-sd -B _services._dns-sd._udp local.
+            ```
+
+            ### 📝 开机自启脚本示例
+            ```sh
+            # /etc/init.d/printer-mdns（在 mdnsd 之后启动）
+            #!/bin/sh
+            export LD_LIBRARY_PATH=/usr/lib
+
+            case "$1" in
+              start)
+                dns-sd -R "Padavan Printer" _printer._tcp local. 9100 rp=auto &
+                dns-sd -R "Padavan Printer" _ipp._tcp local. 9100 rp=auto pdl=application/pdf AirPrint=1 &
+                echo "Printer mDNS services registered"
+                ;;
+              stop)
+                killall dns-sd 2>/dev/null
+                ;;
+              restart)
+                $0 stop; sleep 1; $0 start
+                ;;
+            esac
+            ```
+
             ### 适用场景
-            - 局域网内自动发现打印机（`_ipp._tcp.local`、`_printer._tcp.local`）
-            - AirPrint、Bonjour 打印
+            - Padavan 路由器 + USB 打印机（p910nd 等）
+            - AirPrint / Bonjour / mDNS 打印机发现
+            - 让 iOS / macOS / Windows 自动发现并使用打印机
             - 纯 IPv4 网络（无 IPv6）
             - MT7620 / MT7621 / MT7628 系列路由器
             - 固件: waylin88/Padavan 及所有基于 hanwckf/rt-n56u 的 Padavan 固件
